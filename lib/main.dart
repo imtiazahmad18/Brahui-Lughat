@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/foundation.dart' show compute, kIsWeb;
 import 'package:flutter/material.dart';
@@ -11,6 +12,7 @@ import 'config/dictionary_config.dart';
 import 'config/dictionary_data_version.dart';
 import 'data/dictionary_entry.dart';
 import 'data/dictionary_repository.dart';
+import 'data/normalization.dart';
 import 'data/search_engine.dart';
 import 'data/urdu_collator.dart';
 import 'data/word_of_the_day.dart';
@@ -18,6 +20,21 @@ import 'ui/web_share_stub.dart'
     if (dart.library.html) 'ui/web_share_web.dart'
     as web_share;
 import 'storage/local_dictionary_storage.dart';
+
+bool _lightPaletteActive = false;
+Color _surfaceColor(BuildContext context) =>
+    _lightPaletteActive ? const Color(0xfffaf8ff) : AppTokens.card;
+Color _textPrimary(BuildContext context) =>
+    _lightPaletteActive ? const Color(0xff211a35) : AppTokens.primary;
+Color _textSecondary(BuildContext context) =>
+    _lightPaletteActive ? const Color(0xff51495f) : AppTokens.secondary;
+Color _textMuted(BuildContext context) =>
+    _lightPaletteActive ? const Color(0xff625b70) : AppTokens.muted;
+Color _accentText(BuildContext context) =>
+    _lightPaletteActive ? const Color(0xff603aa8) : AppTokens.accentSoft;
+Color _borderColor(BuildContext context) => _lightPaletteActive
+    ? Colors.black.withValues(alpha: .10)
+    : Colors.white.withValues(alpha: .08);
 
 final _dictionaryProvider = Provider<List<DictionaryEntry>>((ref) => const []);
 void main() => runApp(const ProviderScope(child: BrahuiApp()));
@@ -28,7 +45,7 @@ class BrahuiApp extends StatefulWidget {
   State<BrahuiApp> createState() => _BrahuiAppState();
 }
 
-class _BrahuiAppState extends State<BrahuiApp> {
+class _BrahuiAppState extends State<BrahuiApp> with WidgetsBindingObserver {
   List<DictionaryEntry> entries = [];
   late DictionarySearch search;
   LocalDictionaryStorage? storage;
@@ -38,6 +55,9 @@ class _BrahuiAppState extends State<BrahuiApp> {
   double fontScale = 1;
   Timer? debounce;
   final FocusNode searchPageFocus = FocusNode();
+  final GlobalKey _homeModePillKey = GlobalKey();
+  final GlobalKey _searchModePillKey = GlobalKey();
+  final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
   Set<int> saved = {};
   List<Map<String, dynamic>> history = [];
   bool loading = true;
@@ -47,16 +67,25 @@ class _BrahuiAppState extends State<BrahuiApp> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _load();
     controller.addListener(() => _onQueryChanged());
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     debounce?.cancel();
     controller.dispose();
     searchPageFocus.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangePlatformBrightness() {
+    if (themeMode == ThemeMode.system) {
+      setState(() => _lightPaletteActive = _usesLightPalette(themeMode));
+    }
   }
 
   void _onQueryChanged() {
@@ -73,32 +102,33 @@ class _BrahuiAppState extends State<BrahuiApp> {
 
   Future<void> _load() async {
     try {
-    storage = await LocalDictionaryStorage.open();
-    final encoded = await rootBundle.loadString(
-      'assets/data/dictionary.built.json',
-    );
-    final data = kIsWeb
-        ? _decodeRows(encoded)
-        : await compute(_decodeRows, encoded);
-    final dataVersion = _dictionaryVersion(encoded, data.length);
-    assert(dataVersion == DictionaryDataVersion.value);
-    await storage!.migrateData(dataVersion);
-    entries = data
-        .map((e) => DictionaryEntry(Map<String, dynamic>.from(e)))
-        .toList();
-    assert(entries.length == DictionaryDataVersion.entryCount);
-    search = DictionarySearch(entries);
-    saved = storage!.loadSavedIds();
-    history = storage!.loadHistory();
-    mode = SearchMode.values[storage!.modeIndex];
-    final tm = storage!.theme;
-    themeMode = tm == 'system'
-        ? ThemeMode.system
-        : tm == 'light'
-        ? ThemeMode.light
-        : ThemeMode.dark;
-    fontScale = <double>[.88, 1.0, 1.12, 1.25][storage!.fontSizeIndex];
-    setState(() => loading = false);
+      storage = await LocalDictionaryStorage.open();
+      final encoded = await rootBundle.loadString(
+        'assets/data/dictionary.built.json',
+      );
+      final data = kIsWeb
+          ? _decodeRows(encoded)
+          : await compute(_decodeRows, encoded);
+      final dataVersion = _dictionaryVersion(encoded, data.length);
+      assert(dataVersion == DictionaryDataVersion.value);
+      await storage!.migrateData(dataVersion);
+      entries = data
+          .map((e) => DictionaryEntry(Map<String, dynamic>.from(e)))
+          .toList();
+      assert(entries.length == DictionaryDataVersion.entryCount);
+      search = DictionarySearch(entries);
+      saved = storage!.loadSavedIds();
+      history = storage!.loadHistory();
+      mode = SearchMode.values[storage!.modeIndex];
+      final tm = storage!.theme;
+      themeMode = tm == 'system'
+          ? ThemeMode.system
+          : tm == 'light'
+          ? ThemeMode.light
+          : ThemeMode.dark;
+      _lightPaletteActive = _usesLightPalette(themeMode);
+      fontScale = <double>[.88, 1.0, 1.12, 1.25][storage!.fontSizeIndex];
+      setState(() => loading = false);
     } catch (error, stackTrace) {
       debugPrint('Dictionary startup failed: $error\n$stackTrace');
       if (mounted) {
@@ -135,9 +165,18 @@ class _BrahuiAppState extends State<BrahuiApp> {
   }
 
   Future<void> _selectMode(SearchMode m) async {
-    setState(() => mode = m);
+    setState(() {
+      mode = m;
+      query = controller.text;
+    });
     await storage?.saveMode(m.index);
   }
+
+  bool _usesLightPalette(ThemeMode value) =>
+      value == ThemeMode.light ||
+      (value == ThemeMode.system &&
+          WidgetsBinding.instance.platformDispatcher.platformBrightness ==
+              Brightness.light);
 
   Future<void> _repeatHistory(Map<String, dynamic> item) async {
     final rawMode = item['mode'];
@@ -151,6 +190,7 @@ class _BrahuiAppState extends State<BrahuiApp> {
   Widget build(BuildContext context) => ProviderScope(
     overrides: [_dictionaryProvider.overrideWithValue(entries)],
     child: MaterialApp(
+      navigatorKey: _navigatorKey,
       debugShowCheckedModeBanner: false,
       title: DictionaryConfig.strings['title']!,
       theme: AppTokens.light(),
@@ -167,7 +207,11 @@ class _BrahuiAppState extends State<BrahuiApp> {
       home: loading
           ? const Scaffold(body: Center(child: CircularProgressIndicator()))
           : loadError != null
-          ? Scaffold(body: Center(child: Text('Could not load dictionary: $loadError')))
+          ? Scaffold(
+              body: Center(
+                child: Text('Could not load dictionary: $loadError'),
+              ),
+            )
           : DecoratedBox(
               decoration: BoxDecoration(
                 gradient:
@@ -203,32 +247,52 @@ class _BrahuiAppState extends State<BrahuiApp> {
             ),
     ),
   );
-  Widget _nav() => NavigationBar(
-    backgroundColor: Theme.of(context).brightness == Brightness.light
-        ? const Color(0xffe7e0f6)
-        : AppTokens.card,
-    selectedIndex: tab,
-    onDestinationSelected: (i) => setState(() => tab = i),
-    destinations: [
-      NavigationDestination(
-        icon: Icon(Icons.home_outlined),
-        selectedIcon: Icon(Icons.home),
-        label: DictionaryConfig.strings['home']!,
+  Widget _nav() => DecoratedBox(
+    decoration: BoxDecoration(
+      color: _lightPaletteActive
+          ? const Color(0xffeee9f8)
+          : const Color(0xff0d0e1c),
+      border: Border(
+        top: BorderSide(
+          color: _lightPaletteActive
+              ? Colors.black12
+              : Colors.white.withValues(alpha: .08),
+        ),
       ),
-      NavigationDestination(
-        icon: Icon(Icons.search),
-        label: DictionaryConfig.strings['search']!,
+    ),
+    child: SizedBox(
+      height: 76,
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 560),
+          child: NavigationBar(
+            backgroundColor: Colors.transparent,
+            selectedIndex: tab,
+            onDestinationSelected: (i) => setState(() => tab = i),
+            destinations: [
+              NavigationDestination(
+                icon: Icon(Icons.home_outlined),
+                selectedIcon: Icon(Icons.home),
+                label: DictionaryConfig.strings['home']!,
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.search),
+                label: DictionaryConfig.strings['search']!,
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.favorite_border),
+                selectedIcon: Icon(Icons.favorite),
+                label: DictionaryConfig.strings['saved']!,
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.history),
+                label: DictionaryConfig.strings['history']!,
+              ),
+            ],
+          ),
+        ),
       ),
-      NavigationDestination(
-        icon: Icon(Icons.favorite_border),
-        selectedIcon: Icon(Icons.favorite),
-        label: DictionaryConfig.strings['saved']!,
-      ),
-      NavigationDestination(
-        icon: Icon(Icons.history),
-        label: DictionaryConfig.strings['history']!,
-      ),
-    ],
+    ),
   );
   Widget _home() => _column(
     ListView(
@@ -242,17 +306,14 @@ class _BrahuiAppState extends State<BrahuiApp> {
                 children: [
                   Text(
                     DictionaryConfig.strings['title']!,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 21,
-                    ),
+                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 21),
                   ),
                   const SizedBox(height: 4),
                   _label(DictionaryConfig.strings['subtitle']!),
                 ],
               ),
             ),
-            _modePill(),
+            _modePill(home: true),
             const SizedBox(width: 8),
             _icon(
               Icons.settings_outlined,
@@ -310,7 +371,7 @@ class _BrahuiAppState extends State<BrahuiApp> {
 
   Widget _searchHeader() => DecoratedBox(
     decoration: BoxDecoration(
-      gradient: Theme.of(context).brightness == Brightness.light
+      gradient: _lightPaletteActive
           ? const LinearGradient(colors: [Color(0xfff6f3ff), Color(0xffe9e4f7)])
           : const LinearGradient(
               begin: Alignment.topCenter,
@@ -334,13 +395,14 @@ class _BrahuiAppState extends State<BrahuiApp> {
                 IconButton(
                   tooltip: DictionaryConfig.strings['browse']!,
                   onPressed: () => setState(() => browseLetter = null),
-                  icon: const Icon(Icons.arrow_back),
+                  icon: Icon(Icons.arrow_back),
                 ),
               Expanded(
                 child: Text(
                   DictionaryConfig.strings['search']!,
                   style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                     fontWeight: FontWeight.bold,
+                    color: _textPrimary(context),
                   ),
                 ),
               ),
@@ -375,11 +437,26 @@ class _BrahuiAppState extends State<BrahuiApp> {
         if (index == 0) {
           return Padding(
             padding: const EdgeInsets.only(bottom: 10),
-            child: Text(
-              '${browseLetter!} · ${words.length} ${DictionaryConfig.strings['headwordUnit']}',
-              textDirection: TextDirection.rtl,
-              textAlign: TextAlign.right,
-              style: const TextStyle(color: AppTokens.secondary),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              textDirection: TextDirection.ltr,
+              children: [
+                Text(
+                  browseLetter!,
+                  textDirection: TextDirection.rtl,
+                  style: TextStyle(color: _textSecondary(context)),
+                ),
+                const SizedBox(width: 6),
+                Text('·', style: TextStyle(color: _textMuted(context))),
+                const SizedBox(width: 6),
+                Directionality(
+                  textDirection: TextDirection.ltr,
+                  child: Text(
+                    '${words.length} ${DictionaryConfig.strings['headwordUnit']}',
+                    style: TextStyle(color: _textSecondary(context)),
+                  ),
+                ),
+              ],
             ),
           );
         }
@@ -421,14 +498,14 @@ class _BrahuiAppState extends State<BrahuiApp> {
                   fontSize: 17,
                   color: selected
                       ? Colors.white
-                      : AppTokens.secondary.withValues(
-                          alpha: enabled ? 1 : .45,
-                        ),
+                      : _textSecondary(
+                          context,
+                        ).withValues(alpha: enabled ? 1 : .45),
                 ),
               ),
               backgroundColor: selected
                   ? AppTokens.accent
-                  : AppTokens.card.withValues(alpha: enabled ? 1 : .45),
+                  : _surfaceColor(context).withValues(alpha: enabled ? 1 : .45),
               onPressed: enabled
                   ? () => setState(() => browseLetter = letter)
                   : null,
@@ -508,9 +585,9 @@ class _BrahuiAppState extends State<BrahuiApp> {
       );
     }
     return Card(
-      color: AppTokens.card,
+      color: _surfaceColor(context),
       child: ListTile(
-        leading: const Icon(Icons.history, color: AppTokens.accentSoft),
+        leading: Icon(Icons.history, color: _accentText(context)),
         title: Text(q),
         subtitle: Text(_time(item['at'])),
         onTap: () => _repeatHistory(item),
@@ -526,10 +603,10 @@ class _BrahuiAppState extends State<BrahuiApp> {
   );
   Widget _label(String s) => Text(
     s,
-    style: const TextStyle(
+    style: TextStyle(
       fontSize: 11,
       letterSpacing: 1.45,
-      color: AppTokens.muted,
+      color: _textMuted(context),
       fontFamily: 'monospace',
       fontWeight: FontWeight.w600,
     ),
@@ -537,80 +614,182 @@ class _BrahuiAppState extends State<BrahuiApp> {
   Widget _icon(IconData icon, String label, VoidCallback onTap) => IconButton(
     onPressed: onTap,
     tooltip: label,
-    icon: Icon(icon, color: AppTokens.secondary),
+    icon: Icon(icon, color: _textSecondary(context)),
     constraints: const BoxConstraints(minHeight: 48, minWidth: 48),
   );
-  Widget _modePill() => InkWell(
-    borderRadius: BorderRadius.circular(28),
-    onTap: _chooseMode,
-    child: Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: AppTokens.card,
-        borderRadius: BorderRadius.circular(28),
-        border: Border.all(color: Colors.white12),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _modeLabel(mode, small: true),
-          const SizedBox(width: 5),
-          const Icon(Icons.swap_horiz, size: 16, color: AppTokens.accentSoft),
-        ],
-      ),
-    ),
-  );
-  Future<void> _chooseMode() async {
-    final m = await showModalBottomSheet<SearchMode>(
-      context: context,
-      backgroundColor: Theme.of(context).brightness == Brightness.light
-          ? const Color(0xfff6f3ff)
-          : AppTokens.card,
-      builder: (c) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: SearchMode.values
-              .map(
-                (m) => ListTile(
-                  title: _modeLabel(m),
-                  trailing: m == mode
-                      ? const Icon(Icons.check, color: AppTokens.accent)
-                      : null,
-                  onTap: () => Navigator.pop(c, m),
-                ),
-              )
-              .toList(),
+  Widget _modePill({bool home = false}) => Semantics(
+    container: true,
+    excludeSemantics: true,
+    button: true,
+    label: 'Search mode: ${_modeCode(mode)}. Change search mode',
+    onTap: () => _chooseMode(home ? _homeModePillKey : _searchModePillKey),
+    child: InkWell(
+      excludeFromSemantics: true,
+      key: home ? _homeModePillKey : _searchModePillKey,
+      borderRadius: BorderRadius.circular(28),
+      onTap: () => _chooseMode(home ? _homeModePillKey : _searchModePillKey),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: _surfaceColor(context),
+          borderRadius: BorderRadius.circular(28),
+          border: Border.all(color: _borderColor(context)),
         ),
-      ),
-    );
-    if (m != null) _selectMode(m);
-  }
-
-  Widget _modeLabel(SearchMode value, {bool small = false}) {
-    final style = TextStyle(
-      fontSize: small ? 11 : 16,
-      color: small ? AppTokens.primary : null,
-    );
-    if (value == SearchMode.brahui) {
-      return Directionality(
-        textDirection: TextDirection.rtl,
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text('\u2067براہوی → اردو\u2069', style: style),
-            Text(' / ', style: style),
-            Directionality(
+            Text(
+              _modeCode(mode),
               textDirection: TextDirection.ltr,
-              child: Text('English', style: style),
+              style: TextStyle(
+                color: _textPrimary(context),
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                letterSpacing: .25,
+              ),
             ),
+            const SizedBox(width: 5),
+            Icon(Icons.swap_horiz, size: 16, color: _accentText(context)),
           ],
+        ),
+      ),
+    ),
+  );
+  String _modeCode(SearchMode value) => switch (value) {
+    SearchMode.brahui => 'BR → UR/EN',
+    SearchMode.english => 'EN → BR',
+    SearchMode.urdu => 'UR → BR',
+  };
+
+  Future<void> _chooseMode(GlobalKey pillKey) async {
+    final presentationContext = _navigatorKey.currentContext;
+    if (presentationContext == null) return;
+    final isWide = MediaQuery.sizeOf(context).width >= 600;
+    SearchMode? selected;
+    if (isWide) {
+      final box = pillKey.currentContext?.findRenderObject() as RenderBox?;
+      if (box == null) return;
+      final topLeft = box.localToGlobal(Offset.zero);
+      final rect = topLeft & box.size;
+      final screen = Offset.zero & MediaQuery.sizeOf(presentationContext);
+      selected = await showMenu<SearchMode>(
+        context: presentationContext,
+        position: RelativeRect.fromRect(rect, screen),
+        color: _surfaceColor(context),
+        surfaceTintColor: Colors.transparent,
+        constraints: const BoxConstraints(minWidth: 340, maxWidth: 380),
+        items: SearchMode.values
+            .map(
+              (item) => PopupMenuItem<SearchMode>(
+                value: item,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 4,
+                ),
+                child: _modeOption(item, compact: true),
+              ),
+            )
+            .toList(),
+      );
+    } else {
+      selected = await showModalBottomSheet<SearchMode>(
+        context: presentationContext,
+        backgroundColor: _surfaceColor(context),
+        useSafeArea: true,
+        builder: (sheetContext) => Padding(
+          padding: const EdgeInsets.fromLTRB(14, 8, 14, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final item in SearchMode.values)
+                InkWell(
+                  borderRadius: BorderRadius.circular(14),
+                  onTap: () => Navigator.pop(sheetContext, item),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: _modeOption(item),
+                  ),
+                ),
+            ],
+          ),
         ),
       );
     }
+    if (selected != null) await _selectMode(selected);
+  }
+
+  Widget _modeOption(SearchMode value, {bool compact = false}) {
+    final index = value.index;
+    final hint = DictionaryConfig
+        .strings[['modeBrahuiHint', 'modeEnglishHint', 'modeUrduHint'][index]]!;
+    final icon = [Icons.translate, Icons.language, Icons.text_fields][index];
+    return Padding(
+      padding: EdgeInsets.symmetric(horizontal: compact ? 2 : 8, vertical: 7),
+      child: Row(
+        children: [
+          Icon(icon, color: _accentText(context)),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _modeTitle(value),
+                const SizedBox(height: 2),
+                Text(
+                  hint,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: _textSecondary(context),
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (value == mode)
+            Padding(
+              padding: EdgeInsets.only(left: 8),
+              child: Icon(
+                Icons.check_circle,
+                color: _accentText(context),
+                size: 20,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _modeTitle(SearchMode value) {
+    final style = TextStyle(
+      fontSize: 15,
+      fontWeight: value == mode ? FontWeight.w700 : FontWeight.w500,
+      color: _textPrimary(context),
+    );
+    if (value == SearchMode.brahui) {
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Directionality(
+            textDirection: TextDirection.rtl,
+            child: Text('براہوی → اردو', style: style),
+          ),
+          Text(' / ', style: style),
+          Text('English', textDirection: TextDirection.ltr, style: style),
+        ],
+      );
+    }
     if (value == SearchMode.english) {
-      return Directionality(
-        textDirection: TextDirection.ltr,
-        child: Text('English → براہوی', style: style),
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text('English → ', textDirection: TextDirection.ltr, style: style),
+          Directionality(
+            textDirection: TextDirection.rtl,
+            child: Text('براہوی', style: style),
+          ),
+        ],
       );
     }
     return Directionality(
@@ -619,56 +798,65 @@ class _BrahuiAppState extends State<BrahuiApp> {
     );
   }
 
-  Widget _searchField({bool home = false}) => TextField(
-    focusNode: home ? null : searchPageFocus,
-    controller: controller,
+  Widget _searchField({bool home = false}) => Directionality(
     textDirection: mode == SearchMode.english
         ? TextDirection.ltr
         : TextDirection.rtl,
-    style: TextStyle(
-      fontFamily: mode == SearchMode.english ? null : 'NotoNastaliqUrdu',
-      fontSize: 18,
-      height: 2,
-      color: AppTokens.primary,
-    ),
-    onTap: () {
-      if (home) {
-        setState(() => tab = 1);
-        WidgetsBinding.instance.addPostFrameCallback(
-          (_) => searchPageFocus.requestFocus(),
-        );
-      }
-    },
-    onSubmitted: _runSearch,
-    decoration: InputDecoration(
-      prefixIcon: const Icon(Icons.search, color: AppTokens.accentSoft),
-      hintText: DictionaryConfig
-          .strings[['searchBrahui', 'searchEnglish', 'searchUrdu'][mode.index]],
-      hintStyle: TextStyle(
-        fontSize: 15,
-        color: AppTokens.muted,
+    child: TextField(
+      focusNode: home ? null : searchPageFocus,
+      controller: controller,
+      textDirection: mode == SearchMode.english
+          ? TextDirection.ltr
+          : TextDirection.rtl,
+      style: TextStyle(
         fontFamily: mode == SearchMode.english ? null : 'NotoNastaliqUrdu',
+        fontSize: 18,
         height: 2,
+        color: _textPrimary(context),
       ),
-      suffixIcon: query.isNotEmpty
-          ? IconButton(
-              onPressed: () => controller.clear(),
-              icon: const Icon(Icons.close),
-            )
-          : null,
-      filled: true,
-      fillColor: AppTokens.card,
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(18),
-        borderSide: BorderSide(color: Colors.white.withValues(alpha: .08)),
-      ),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(18),
-        borderSide: BorderSide(color: Colors.white.withValues(alpha: .08)),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(18),
-        borderSide: const BorderSide(color: AppTokens.accent),
+      onTap: () {
+        if (home) {
+          setState(() => tab = 1);
+          WidgetsBinding.instance.addPostFrameCallback(
+            (_) => searchPageFocus.requestFocus(),
+          );
+        }
+      },
+      onSubmitted: _runSearch,
+      decoration: InputDecoration(
+        prefixIcon: Icon(Icons.search, color: _accentText(context)),
+        hintText:
+            DictionaryConfig.strings[[
+              'searchBrahui',
+              'searchEnglish',
+              'searchUrdu',
+            ][mode.index]],
+        hintStyle: TextStyle(
+          fontSize: 15,
+          color: _textMuted(context),
+          fontFamily: mode == SearchMode.english ? null : 'NotoNastaliqUrdu',
+          height: 2,
+        ),
+        suffixIcon: query.isNotEmpty
+            ? IconButton(
+                onPressed: () => controller.clear(),
+                icon: Icon(Icons.close),
+              )
+            : null,
+        filled: true,
+        fillColor: _surfaceColor(context),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(18),
+          borderSide: BorderSide(color: _borderColor(context)),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(18),
+          borderSide: BorderSide(color: _borderColor(context)),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(18),
+          borderSide: const BorderSide(color: AppTokens.accent),
+        ),
       ),
     ),
   );
@@ -684,16 +872,23 @@ class _BrahuiAppState extends State<BrahuiApp> {
       orElse: () => null,
     );
     return InkWell(
-      onTap: () => _detail(e),
+      onTap: () =>
+          _openWordModal(search.groups.firstWhere((g) => g.norm == e.wordNorm)),
       child: Container(
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(20),
-          gradient: const LinearGradient(
-            colors: [Color(0xff2b2070), Color(0xff0e2a4a)],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
+          gradient: _lightPaletteActive
+              ? const LinearGradient(
+                  colors: [Color(0xffe6ddfa), Color(0xffdceaf7)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                )
+              : const LinearGradient(
+                  colors: [Color(0xff2b2070), Color(0xff0e2a4a)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
           boxShadow: [
             BoxShadow(
               color: AppTokens.accent.withValues(alpha: .24),
@@ -710,10 +905,7 @@ class _BrahuiAppState extends State<BrahuiApp> {
                 if (audioPath.isNotEmpty)
                   IconButton(
                     onPressed: () => _play(audioPath),
-                    icon: const Icon(
-                      Icons.volume_up,
-                      color: AppTokens.accentSoft,
-                    ),
+                    icon: Icon(Icons.volume_up, color: _accentText(context)),
                     tooltip: DictionaryConfig.strings['playAudio'],
                     constraints: const BoxConstraints(
                       minHeight: 48,
@@ -725,7 +917,7 @@ class _BrahuiAppState extends State<BrahuiApp> {
                     e.word,
                     textDirection: TextDirection.rtl,
                     textAlign: TextAlign.right,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontFamily: 'NotoNastaliqUrdu',
                       fontSize: 31,
                       height: 2.15,
@@ -738,16 +930,18 @@ class _BrahuiAppState extends State<BrahuiApp> {
             if ('${e.raw['roman'] ?? ''}${e.raw['ipa'] ?? ''}'.isNotEmpty)
               Text(
                 '${e.raw['roman'] ?? ''}  ${e.raw['ipa'] ?? ''}',
-                style: const TextStyle(color: AppTokens.phonetic),
+                style: TextStyle(color: AppTokens.phonetic),
               ),
             if ((e.raw['pos'] ?? '') != '') _pos(e.raw['pos']),
             _meaningRow(
+              context: context,
               label: DictionaryConfig.strings['label_urdu_meaning']!,
               value: e.urdu,
               direction: TextDirection.rtl,
               card: true,
             ),
             _meaningRow(
+              context: context,
               label: DictionaryConfig.strings['label_english_meaning']!,
               value: e.english,
               direction: TextDirection.ltr,
@@ -757,10 +951,10 @@ class _BrahuiAppState extends State<BrahuiApp> {
               Text(
                 '“${firstExample['brahui']}”',
                 textDirection: TextDirection.rtl,
-                style: const TextStyle(
+                style: TextStyle(
                   fontFamily: 'NotoNastaliqUrdu',
                   height: 2,
-                  color: AppTokens.accentSoft,
+                  color: _accentText(context),
                 ),
               ),
             Align(
@@ -773,7 +967,7 @@ class _BrahuiAppState extends State<BrahuiApp> {
                     : TextDirection.rtl,
                 child: TextButton.icon(
                   onPressed: () => _detail(e),
-                  icon: const Icon(Icons.arrow_forward, size: 16),
+                  icon: Icon(Icons.arrow_forward, size: 16),
                   label: Text(DictionaryConfig.strings['viewFullEntry']!),
                 ),
               ),
@@ -788,7 +982,7 @@ class _BrahuiAppState extends State<BrahuiApp> {
     if (history.isEmpty)
       return Text(
         DictionaryConfig.strings['recentSearchesEmpty']!,
-        style: const TextStyle(color: AppTokens.muted),
+        style: TextStyle(color: _textMuted(context)),
       );
     final recent = history.take(6).toList();
     return GridView.builder(
@@ -806,11 +1000,11 @@ class _BrahuiAppState extends State<BrahuiApp> {
         return ActionChip(
           label: Text(
             '${h['q']}',
-            style: const TextStyle(color: AppTokens.primary),
+            style: TextStyle(color: _textPrimary(context)),
           ),
-          avatar: const Icon(Icons.arrow_forward, size: 15),
+          avatar: Icon(Icons.arrow_forward, size: 15),
           onPressed: () => _repeatHistory(h),
-          backgroundColor: AppTokens.card,
+          backgroundColor: _surfaceColor(context),
         );
       },
     );
@@ -859,15 +1053,12 @@ class _BrahuiAppState extends State<BrahuiApp> {
     child: Row(
       children: [
         Expanded(
-          child: Text(
-            label,
-            style: const TextStyle(color: AppTokens.secondary),
-          ),
+          child: Text(label, style: TextStyle(color: _textSecondary(context))),
         ),
         Text(
           '$value',
-          style: const TextStyle(
-            color: AppTokens.accentSoft,
+          style: TextStyle(
+            color: _accentText(context),
             fontWeight: FontWeight.bold,
           ),
         ),
@@ -875,9 +1066,9 @@ class _BrahuiAppState extends State<BrahuiApp> {
     ),
   );
   BoxDecoration _box() => BoxDecoration(
-    color: AppTokens.card,
+    color: _surfaceColor(context),
     borderRadius: BorderRadius.circular(18),
-    border: Border.all(color: Colors.white.withValues(alpha: .07)),
+    border: Border.all(color: _borderColor(context)),
   );
   Widget _letters() {
     final present = entries.map((e) => e.letter).toSet().toList()
@@ -894,10 +1085,10 @@ class _BrahuiAppState extends State<BrahuiApp> {
             style: TextStyle(
               fontFamily: 'NotoNastaliqUrdu',
               fontSize: 15,
-              color: Colors.white,
+              color: _textPrimary(context),
             ),
           ),
-          backgroundColor: AppTokens.card,
+          backgroundColor: _surfaceColor(context),
           onPressed: () => _browseLetter(l),
         );
       }).toList(),
@@ -915,7 +1106,7 @@ class _BrahuiAppState extends State<BrahuiApp> {
     if (tags.isEmpty)
       return Text(
         DictionaryConfig.strings['noCategories']!,
-        style: const TextStyle(color: AppTokens.muted),
+        style: TextStyle(color: _textMuted(context)),
       );
     return Wrap(
       spacing: 8,
@@ -924,7 +1115,7 @@ class _BrahuiAppState extends State<BrahuiApp> {
             (t) => FilterChip(
               label: Text(
                 DictionaryConfig.tagLabels[t]?['en'] ?? t,
-                style: const TextStyle(color: AppTokens.primary),
+                style: TextStyle(color: _textPrimary(context)),
               ),
               selected: false,
               onSelected: (_) => _filterTag(t),
@@ -943,9 +1134,9 @@ class _BrahuiAppState extends State<BrahuiApp> {
         )
         .toList();
     showModalBottomSheet(
-      context: context,
+      context: _navigatorKey.currentContext!,
       isScrollControlled: true,
-      backgroundColor: AppTokens.bgBottom,
+      backgroundColor: _surfaceColor(context),
       builder: (c) => ListView(
         padding: const EdgeInsets.all(18),
         children: matches.map(_resultCard).toList(),
@@ -960,29 +1151,78 @@ class _BrahuiAppState extends State<BrahuiApp> {
           padding: const EdgeInsets.only(top: 20),
           child: Text(
             DictionaryConfig.strings['typeTwoCharacters']!,
-            style: const TextStyle(color: AppTokens.muted),
+            style: TextStyle(color: _textMuted(context)),
           ),
         ),
       ];
     final hits = search.search(query, mode);
-    if (hits.isEmpty) return [_empty(DictionaryConfig.strings['noResults']!)];
     final widgets = <Widget>[];
-    for (final tier in [1, 2, 3, 4, 5, 6]) {
-      final group = hits.where((h) => h.tier == tier).toList();
+    final hasRelevantResults = hits.any((hit) => hit.tier < 6);
+    final switchMode = suggestedModeForScript(
+      query,
+      mode,
+      hasResults: hasRelevantResults,
+    );
+    if (switchMode != null) {
+      widgets.add(
+        Padding(
+          padding: const EdgeInsets.only(bottom: 10),
+          child: Material(
+            color: AppTokens.accent.withValues(alpha: .12),
+            borderRadius: BorderRadius.circular(12),
+            child: ListTile(
+              dense: true,
+              leading: Icon(Icons.swap_horiz, color: _accentText(context)),
+              title: Text(
+                DictionaryConfig.strings[switchMode == SearchMode.urdu
+                    ? 'switchToUrdu'
+                    : 'switchToEnglish']!,
+                style: TextStyle(color: _textSecondary(context), fontSize: 13),
+              ),
+              onTap: () => _selectMode(switchMode),
+            ),
+          ),
+        ),
+      );
+    }
+    if (!hasRelevantResults) {
+      widgets.add(
+        _empty(
+          DictionaryConfig.strings['noResultsFor']!.replaceFirst(
+            '{query}',
+            query,
+          ),
+        ),
+      );
+      if (hits.isEmpty) return widgets;
+    }
+    final order = mode == SearchMode.brahui
+        ? [1, 2, 3, 4, 5, 6]
+        : [1, 2, 3, 4, 5, 6, 7];
+    for (final tier in order) {
+      var group = hits.where((h) => h.tier == tier).toList();
+      if (!hasRelevantResults && mode != SearchMode.brahui && tier == 6) {
+        group = group.take(5).toList();
+      }
       if (group.isEmpty) continue;
-      if (tier == 5 || tier == 6) {
+      if ((mode == SearchMode.brahui && (tier == 5 || tier == 6)) ||
+          (mode != SearchMode.brahui && (tier == 6 || tier == 7))) {
         widgets.add(
           Padding(
             padding: const EdgeInsets.only(top: 18, bottom: 8),
             child: _label(
-              tier == 5
-                  ? DictionaryConfig.strings['similar']!
-                  : DictionaryConfig.strings['meanings']!,
+              mode == SearchMode.brahui
+                  ? (tier == 5
+                        ? DictionaryConfig.strings['similar']!
+                        : DictionaryConfig.strings['meanings']!)
+                  : (tier == 6
+                        ? DictionaryConfig.strings['similar']!
+                        : DictionaryConfig.strings['partialMatches']!),
             ),
           ),
         );
       }
-      widgets.addAll(group.map((h) => _resultCard(h.headword)));
+      widgets.addAll(group.map((h) => _resultCard(h.headword, hit: h)));
     }
     return widgets;
   }
@@ -991,8 +1231,9 @@ class _BrahuiAppState extends State<BrahuiApp> {
     Headword headword, {
     String? subtitle,
     VoidCallback? onTap,
+    SearchHit? hit,
   }) => InkWell(
-    onTap: onTap ?? () => _detail(headword.primary),
+    onTap: onTap ?? () => _openWordModal(headword),
     borderRadius: BorderRadius.circular(16),
     child: Container(
       margin: const EdgeInsets.only(bottom: 10),
@@ -1000,78 +1241,97 @@ class _BrahuiAppState extends State<BrahuiApp> {
       decoration: _box(),
       child: Directionality(
         textDirection: TextDirection.ltr,
-        child: Row(
+        child: Stack(
           children: [
-            IconButton(
-              onPressed: () => _toggleSave(headword.primary.id),
-              tooltip: saved.contains(headword.primary.id)
-                  ? DictionaryConfig.strings['removeSaved']
-                  : DictionaryConfig.strings['saveWord'],
-              constraints: const BoxConstraints(minHeight: 48, minWidth: 48),
-              icon: Icon(
-                saved.contains(headword.primary.id)
-                    ? Icons.favorite
-                    : Icons.favorite_border,
-                color: saved.contains(headword.primary.id)
-                    ? AppTokens.accent
-                    : AppTokens.muted,
+            Positioned(
+              top: 0,
+              left: 0,
+              child: IconButton(
+                onPressed: () => _toggleSave(headword.primary.id),
+                tooltip: saved.contains(headword.primary.id)
+                    ? DictionaryConfig.strings['removeSaved']
+                    : DictionaryConfig.strings['saveWord'],
+                constraints: const BoxConstraints(minHeight: 48, minWidth: 48),
+                icon: Icon(
+                  saved.contains(headword.primary.id)
+                      ? Icons.favorite
+                      : Icons.favorite_border,
+                  color: saved.contains(headword.primary.id)
+                      ? AppTokens.accent
+                      : _textMuted(context),
+                ),
               ),
             ),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text(
-                    headword.word,
-                    textDirection: TextDirection.rtl,
-                    textAlign: TextAlign.right,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontFamily: 'NotoNastaliqUrdu',
-                      fontSize: 20,
-                      height: 2.0,
-                      fontWeight: FontWeight.bold,
-                      color: AppTokens.primary,
-                    ),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  headword.word,
+                  textDirection: TextDirection.rtl,
+                  textAlign: TextAlign.right,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontFamily: 'NotoNastaliqUrdu',
+                    fontSize: 20,
+                    height: 2.0,
+                    fontWeight: FontWeight.bold,
+                    color: _textPrimary(context),
                   ),
-                  const SizedBox(height: 4),
-                  if (headword.senses.length > 1)
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: Text(
-                        '${headword.senses.length} ${DictionaryConfig.strings['senses']}',
-                        style: const TextStyle(
-                          color: AppTokens.accentSoft,
-                          fontSize: 12,
-                        ),
+                ),
+                const SizedBox(height: 4),
+                if (headword.senses.length > 1)
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: Text(
+                      '${headword.senses.length} ${DictionaryConfig.strings['senses']}',
+                      style: TextStyle(
+                        color: _accentText(context),
+                        fontSize: 12,
                       ),
                     ),
-                  _meaningRow(
-                    label: DictionaryConfig.strings['label_urdu_meaning']!,
-                    value: headword.senses.first['urdu'] ?? '',
-                    direction: TextDirection.rtl,
-                    card: true,
                   ),
-                  _meaningRow(
-                    label: DictionaryConfig.strings['label_english_meaning']!,
-                    value: headword.senses.first['english'] ?? '',
-                    direction: TextDirection.ltr,
-                    card: true,
-                  ),
-                  if (subtitle != null && subtitle.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 2),
-                      child: Text(
-                        subtitle,
-                        style: const TextStyle(
-                          color: AppTokens.muted,
-                          fontSize: 11,
-                        ),
+                _meaningRow(
+                  context: context,
+                  label: DictionaryConfig.strings['label_urdu_meaning']!,
+                  value:
+                      hit?.matchedEntry?.urdu ??
+                      headword.senses.first['urdu'] ??
+                      '',
+                  direction: TextDirection.rtl,
+                  card: true,
+                  emphasis: hit?.glossLanguage == SearchGlossLanguage.urdu,
+                  highlightGloss: hit?.glossLanguage == SearchGlossLanguage.urdu
+                      ? hit?.matchedGloss
+                      : null,
+                ),
+                _meaningRow(
+                  context: context,
+                  label: DictionaryConfig.strings['label_english_meaning']!,
+                  value:
+                      hit?.matchedEntry?.english ??
+                      headword.senses.first['english'] ??
+                      '',
+                  direction: TextDirection.ltr,
+                  card: true,
+                  emphasis: hit?.glossLanguage == SearchGlossLanguage.english,
+                  highlightGloss:
+                      hit?.glossLanguage == SearchGlossLanguage.english
+                      ? hit?.matchedGloss
+                      : null,
+                ),
+                if (subtitle != null && subtitle.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text(
+                      subtitle,
+                      style: TextStyle(
+                        color: _textMuted(context),
+                        fontSize: 11,
                       ),
                     ),
-                ],
-              ),
+                  ),
+              ],
             ),
           ],
         ),
@@ -1091,7 +1351,7 @@ class _BrahuiAppState extends State<BrahuiApp> {
         ),
         child: Text(
           label,
-          style: const TextStyle(color: AppTokens.accentSoft, fontSize: 12),
+          style: TextStyle(color: _accentText(context), fontSize: 12),
         ),
       ),
     );
@@ -1103,7 +1363,7 @@ class _BrahuiAppState extends State<BrahuiApp> {
       child: Text(
         text,
         textAlign: TextAlign.center,
-        style: const TextStyle(color: AppTokens.muted),
+        style: TextStyle(color: _textMuted(context)),
       ),
     ),
   );
@@ -1113,8 +1373,7 @@ class _BrahuiAppState extends State<BrahuiApp> {
     return '${dt.day}/${dt.month}/${dt.year} · ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
   }
 
-  void _detail(DictionaryEntry e) => Navigator.push(
-    context,
+  void _detail(DictionaryEntry e) => _navigatorKey.currentState!.push(
     MaterialPageRoute(
       builder: (_) => EntryDetail(
         entry: e,
@@ -1124,6 +1383,309 @@ class _BrahuiAppState extends State<BrahuiApp> {
       ),
     ),
   );
+
+  Future<void> _openWordModal(Headword headword) => showGeneralDialog<void>(
+    context: _navigatorKey.currentContext!,
+    barrierDismissible: true,
+    barrierLabel: 'Close word details',
+    barrierColor: Colors.black.withValues(alpha: .60),
+    transitionDuration: const Duration(milliseconds: 180),
+    pageBuilder: (dialogContext, animation, secondaryAnimation) {
+      final entry = headword.primary;
+      final senses = headword.senses;
+      final variants = entry.variants
+          .skip(1)
+          .where((v) => v.trim().isNotEmpty)
+          .toList();
+      final roman = '${entry.raw['roman'] ?? ''}'.trim();
+      final pos = '${entry.raw['pos'] ?? ''}'.trim();
+      final audio = '${entry.raw['audio'] ?? ''}'.trim();
+      var isSaved = saved.contains(entry.id);
+      final blocks = <Widget>[
+        Row(
+          children: [
+            IconButton(
+              tooltip: 'Close',
+              onPressed: () => Navigator.pop(dialogContext),
+              icon: Icon(Icons.close),
+            ),
+            const Spacer(),
+            StatefulBuilder(
+              builder: (context, refresh) => IconButton(
+                tooltip: isSaved
+                    ? DictionaryConfig.strings['removeSaved']!
+                    : DictionaryConfig.strings['saveWord']!,
+                onPressed: () {
+                  isSaved = !isSaved;
+                  _toggleSave(entry.id);
+                  refresh(() {});
+                },
+                icon: Icon(
+                  isSaved ? Icons.favorite : Icons.favorite_border,
+                  color: isSaved
+                      ? _accentText(context)
+                      : _textSecondary(context),
+                ),
+              ),
+            ),
+            IconButton(
+              tooltip: DictionaryConfig.strings['copy']!,
+              onPressed: () =>
+                  Clipboard.setData(ClipboardData(text: _wordShareText(entry))),
+              icon: Icon(Icons.copy),
+            ),
+            IconButton(
+              tooltip: DictionaryConfig.strings['share']!,
+              onPressed: () => _shareWord(entry, dialogContext),
+              icon: Icon(Icons.share_outlined),
+            ),
+            if (audio.isNotEmpty)
+              IconButton(
+                tooltip: DictionaryConfig.strings['playAudio']!,
+                onPressed: () => _play(audio),
+                icon: Icon(Icons.volume_up_outlined),
+              ),
+          ],
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 4, 20, 0),
+          child: Text(
+            headword.word,
+            textDirection: TextDirection.rtl,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontFamily: 'NotoNastaliqUrdu',
+              fontSize: 36,
+              height: 2.05,
+              fontWeight: FontWeight.bold,
+              color: _textPrimary(context),
+            ),
+          ),
+        ),
+        if (variants.isNotEmpty)
+          Wrap(
+            alignment: WrapAlignment.center,
+            spacing: 8,
+            runSpacing: 4,
+            children: variants
+                .map(
+                  (variant) => Chip(
+                    label: Text(
+                      variant,
+                      textDirection: TextDirection.rtl,
+                      style: TextStyle(
+                        fontFamily: 'NotoNastaliqUrdu',
+                        fontSize: 14,
+                      ),
+                    ),
+                    backgroundColor: Theme.of(
+                      dialogContext,
+                    ).colorScheme.surfaceContainerHighest,
+                    side: BorderSide(
+                      color: AppTokens.accent.withValues(alpha: .3),
+                    ),
+                  ),
+                )
+                .toList(),
+          ),
+        if (roman.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(
+              roman,
+              textAlign: TextAlign.center,
+              style: TextStyle(color: AppTokens.phonetic, fontSize: 16),
+            ),
+          ),
+        if (pos.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Center(child: _pos(pos)),
+          ),
+        for (var index = 0; index < senses.length; index++) ...[
+          if (senses.length > 1)
+            Padding(
+              padding: const EdgeInsets.only(top: 18, bottom: 6),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppTokens.accent.withValues(alpha: .18),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    '${DictionaryConfig.strings['sense']} ${index + 1}',
+                    style: TextStyle(color: _accentText(context), fontSize: 12),
+                  ),
+                ),
+              ),
+            ),
+          if ((senses[index]['urdu'] ?? '').trim().isNotEmpty)
+            _modalMeaningCard(
+              DictionaryConfig.strings['label_urdu_meaning']!,
+              senses[index]['urdu']!,
+              TextDirection.rtl,
+            ),
+          if ((senses[index]['english'] ?? '').trim().isNotEmpty)
+            _modalMeaningCard(
+              DictionaryConfig.strings['label_english_meaning']!,
+              senses[index]['english']!,
+              TextDirection.ltr,
+            ),
+        ],
+        const SizedBox(height: 8),
+        Center(
+          child: TextButton.icon(
+            onPressed: () {
+              Navigator.pop(dialogContext);
+              WidgetsBinding.instance.addPostFrameCallback(
+                (_) => _detail(entry),
+              );
+            },
+            icon: Icon(Icons.open_in_new, size: 16),
+            label: Text('Full entry →'),
+          ),
+        ),
+      ];
+      return BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 7, sigmaY: 7),
+        child: Center(
+          child: Dialog(
+            insetPadding: const EdgeInsets.all(20),
+            backgroundColor: Theme.of(dialogContext).colorScheme.surface,
+            surfaceTintColor: Colors.transparent,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(24),
+              side: BorderSide(color: AppTokens.accent.withValues(alpha: .28)),
+            ),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: 480,
+                maxHeight: MediaQuery.sizeOf(dialogContext).height * .85,
+              ),
+              child: Container(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(24),
+                  boxShadow: [
+                    BoxShadow(
+                      color: AppTokens.accent.withValues(alpha: .16),
+                      blurRadius: 28,
+                    ),
+                  ],
+                ),
+                child: StatefulBuilder(
+                  builder: (context, refresh) => SingleChildScrollView(
+                    padding: const EdgeInsets.fromLTRB(14, 8, 14, 16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      mainAxisSize: MainAxisSize.min,
+                      children: blocks,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    },
+    transitionBuilder: (context, animation, secondaryAnimation, child) {
+      if (MediaQuery.disableAnimationsOf(context)) return child;
+      final eased = CurvedAnimation(
+        parent: animation,
+        curve: Curves.easeOutCubic,
+      );
+      return FadeTransition(
+        opacity: eased,
+        child: ScaleTransition(
+          scale: Tween(begin: .97, end: 1.0).animate(eased),
+          child: child,
+        ),
+      );
+    },
+  );
+
+  String _wordShareText(DictionaryEntry entry) =>
+      '${entry.word}\n${entry.urdu}\n${entry.english}';
+
+  Future<void> _shareWord(
+    DictionaryEntry entry,
+    BuildContext dialogContext,
+  ) async {
+    final text = _wordShareText(entry);
+    if (await web_share.shareText(text)) return;
+    if (kIsWeb) {
+      await Clipboard.setData(ClipboardData(text: text));
+      if (dialogContext.mounted) {
+        ScaffoldMessenger.of(dialogContext).showSnackBar(
+          SnackBar(content: Text(DictionaryConfig.strings['copied']!)),
+        );
+      }
+      return;
+    }
+    await SharePlus.instance.share(ShareParams(text: text));
+  }
+
+  Widget _modalMeaningCard(
+    String label,
+    String value,
+    TextDirection direction,
+  ) => Container(
+    margin: const EdgeInsets.only(top: 10),
+    padding: const EdgeInsets.all(16),
+    decoration: BoxDecoration(
+      color: _lightPaletteActive ? Colors.white : _surfaceColor(context),
+      borderRadius: BorderRadius.circular(16),
+      border: Border.all(color: _borderColor(context)),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          label,
+          textDirection: direction,
+          style: TextStyle(
+            color: _textMuted(context),
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 6),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final style = TextStyle(
+              fontFamily: direction == TextDirection.rtl
+                  ? 'NotoNastaliqUrdu'
+                  : null,
+              fontSize: direction == TextDirection.rtl ? 24 : 18,
+              height: direction == TextDirection.rtl ? 2.0 : 1.45,
+              color: Theme.of(context).colorScheme.onSurface,
+            );
+            final painter = TextPainter(
+              text: TextSpan(text: value, style: style),
+              textDirection: direction,
+              maxLines: 1,
+            )..layout(maxWidth: constraints.maxWidth);
+            return Text(
+              value,
+              textDirection: direction,
+              textAlign: painter.didExceedMaxLines
+                  ? (direction == TextDirection.rtl
+                        ? TextAlign.right
+                        : TextAlign.left)
+                  : TextAlign.center,
+              style: style,
+            );
+          },
+        ),
+      ],
+    ),
+  );
+
   Future<void> _play(String path) async {
     if (path.isEmpty) return;
     final player = AudioPlayer();
@@ -1138,11 +1700,11 @@ class _BrahuiAppState extends State<BrahuiApp> {
 
   Future<void> _settings() async {
     await showModalBottomSheet<void>(
-      context: context,
+      context: _navigatorKey.currentContext!,
       isScrollControlled: true,
-      backgroundColor: Theme.of(context).brightness == Brightness.light
+      backgroundColor: _lightPaletteActive
           ? const Color(0xfff6f3ff)
-          : AppTokens.card,
+          : _surfaceColor(context),
       builder: (sheetContext) => StatefulBuilder(
         builder: (sheetContext, refreshSheet) {
           return SafeArea(
@@ -1169,7 +1731,10 @@ class _BrahuiAppState extends State<BrahuiApp> {
                           label: Text(item.$1),
                           selected: themeMode == item.$2,
                           onSelected: (_) {
-                            setState(() => themeMode = item.$2);
+                            setState(() {
+                              themeMode = item.$2;
+                              _lightPaletteActive = _usesLightPalette(item.$2);
+                            });
                             refreshSheet(() {});
                             storage?.saveTheme(item.$1.toLowerCase());
                           },
@@ -1223,7 +1788,7 @@ class _BrahuiAppState extends State<BrahuiApp> {
                       '{count}',
                       '${entries.length}',
                     ),
-                    style: const TextStyle(color: AppTokens.muted),
+                    style: TextStyle(color: _textMuted(context)),
                   ),
                 ],
               ),
@@ -1239,10 +1804,13 @@ List<Map<String, dynamic>> _decodeRows(String encoded) =>
     DictionaryRepository.decodeRows(encoded);
 
 Widget _meaningRow({
+  required BuildContext context,
   required String label,
   required String value,
   required TextDirection direction,
   required bool card,
+  bool emphasis = false,
+  String? highlightGloss,
 }) {
   if (value.trim().isEmpty) return const SizedBox.shrink();
   final size = card ? 18.0 : 20.0;
@@ -1250,13 +1818,14 @@ Widget _meaningRow({
     fontFamily: direction == TextDirection.rtl ? 'NotoNastaliqUrdu' : null,
     fontSize: direction == TextDirection.rtl ? size : (card ? 14 : 16),
     height: direction == TextDirection.rtl ? 2.0 : 1.5,
-    color: AppTokens.secondary,
+    color: emphasis ? _textPrimary(context) : _textSecondary(context),
+    fontWeight: emphasis ? FontWeight.w700 : FontWeight.normal,
   );
   final labelStyle = TextStyle(
     fontFamily: direction == TextDirection.rtl ? 'NotoNastaliqUrdu' : null,
-    fontSize: card ? 11 : 12,
+    fontSize: card ? 14 : 14,
     height: direction == TextDirection.rtl ? 2.0 : 1.5,
-    color: AppTokens.accentSoft,
+    color: _accentText(context),
     fontWeight: FontWeight.w600,
   );
   return Directionality(
@@ -1271,7 +1840,21 @@ Widget _meaningRow({
       text: TextSpan(
         children: [
           TextSpan(text: '$label: ', style: labelStyle),
-          TextSpan(text: value, style: valueStyle),
+          if (highlightGloss == null || highlightGloss.isEmpty)
+            TextSpan(text: value, style: valueStyle)
+          else
+            for (final part in value.split(RegExp(r'([۔،؛;,/\n])')))
+              TextSpan(
+                text: part,
+                style:
+                    DictionaryNormalization.normalize(part) ==
+                        DictionaryNormalization.normalize(highlightGloss)
+                    ? valueStyle.copyWith(
+                        color: _textPrimary(context),
+                        fontWeight: FontWeight.w700,
+                      )
+                    : valueStyle,
+              ),
         ],
       ),
     ),
@@ -1283,8 +1866,13 @@ String _dictionaryVersion(String encoded, int entryCount) {
   for (final unit in encoded.codeUnits) {
     final value = hash ^ unit;
     // Shift/add keeps the multiplication exact on Flutter Web's JS numbers.
-    hash = (value + (value << 1) + (value << 4) + (value << 7) +
-            (value << 8) + (value << 24)) &
+    hash =
+        (value +
+            (value << 1) +
+            (value << 4) +
+            (value << 7) +
+            (value << 8) +
+            (value << 24)) &
         0xffffffff;
   }
   return '$entryCount-${hash.toRadixString(16).padLeft(8, '0')}';
@@ -1357,7 +1945,7 @@ class _EntryDetailState extends State<EntryDetail> {
             )
             .toList();
     return Scaffold(
-      backgroundColor: AppTokens.bgBottom,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: Text(DictionaryConfig.strings['entry']!),
         actions: [
@@ -1368,12 +1956,12 @@ class _EntryDetailState extends State<EntryDetail> {
                 text: '${entry.word}\n${entry.urdu}\n${entry.english}',
               ),
             ),
-            icon: const Icon(Icons.copy),
+            icon: Icon(Icons.copy),
           ),
           IconButton(
             tooltip: DictionaryConfig.strings['share'],
             onPressed: () => _shareEntry(context),
-            icon: const Icon(Icons.share),
+            icon: Icon(Icons.share),
           ),
           IconButton(
             tooltip: DictionaryConfig.strings['saveWord'],
@@ -1400,7 +1988,7 @@ class _EntryDetailState extends State<EntryDetail> {
                   fontSize: 34,
                   height: 2.1,
                   fontWeight: FontWeight.bold,
-                  color: AppTokens.primary,
+                  color: _textPrimary(context),
                 ),
               ),
               Align(
@@ -1412,27 +2000,27 @@ class _EntryDetailState extends State<EntryDetail> {
                     vertical: 8,
                   ),
                   decoration: BoxDecoration(
-                    color: AppTokens.card,
+                    color: _surfaceColor(context),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Text(
+                      Text(
                         'LETTER',
                         style: TextStyle(
-                          color: AppTokens.secondary,
+                          color: _textSecondary(context),
                           fontSize: 11,
                         ),
                       ),
                       Text(
                         entry.letter,
                         textDirection: TextDirection.rtl,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontFamily: 'NotoNastaliqUrdu',
                           fontSize: 22,
                           height: 1.5,
-                          color: AppTokens.accentSoft,
+                          color: _accentText(context),
                         ),
                       ),
                     ],
@@ -1448,20 +2036,20 @@ class _EntryDetailState extends State<EntryDetail> {
                       children: [
                         TextSpan(
                           text: '${DictionaryConfig.strings['variants']}: ',
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontFamily: 'NotoNastaliqUrdu',
                             fontSize: 14,
                             height: 2,
-                            color: AppTokens.secondary,
+                            color: _textSecondary(context),
                           ),
                         ),
                         TextSpan(
                           text: variants.skip(1).join(' / '),
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontFamily: 'NotoNastaliqUrdu',
                             fontSize: 18,
                             height: 2,
-                            color: AppTokens.secondary,
+                            color: _textSecondary(context),
                           ),
                         ),
                       ],
@@ -1472,10 +2060,7 @@ class _EntryDetailState extends State<EntryDetail> {
                   .isNotEmpty)
                 Text(
                   '${entry.raw['roman'] ?? ''}  ${entry.raw['ipa'] ?? ''}',
-                  style: const TextStyle(
-                    color: AppTokens.phonetic,
-                    fontSize: 16,
-                  ),
+                  style: TextStyle(color: AppTokens.phonetic, fontSize: 16),
                 ),
               const SizedBox(height: 4),
               if ('${entry.raw['pos'] ?? ''}'.isNotEmpty)
@@ -1491,8 +2076,8 @@ class _EntryDetailState extends State<EntryDetail> {
                 group.senses.length == 1
                     ? DictionaryConfig.strings['meaning']!
                     : DictionaryConfig.strings['definitionsSenses']!,
-                style: const TextStyle(
-                  color: AppTokens.muted,
+                style: TextStyle(
+                  color: _textMuted(context),
                   letterSpacing: 1.4,
                 ),
               ),
@@ -1508,8 +2093,8 @@ class _EntryDetailState extends State<EntryDetail> {
                 const SizedBox(height: 18),
                 Text(
                   DictionaryConfig.strings['examples']!,
-                  style: const TextStyle(
-                    color: AppTokens.muted,
+                  style: TextStyle(
+                    color: _textMuted(context),
                     letterSpacing: 1.4,
                   ),
                 ),
@@ -1519,18 +2104,15 @@ class _EntryDetailState extends State<EntryDetail> {
                   padding: const EdgeInsets.only(top: 18),
                   child: Text(
                     DictionaryConfig.strings['noExamples']!,
-                    style: const TextStyle(color: AppTokens.muted),
+                    style: TextStyle(color: _textMuted(context)),
                   ),
                 ),
               if ('${entry.raw['audio'] ?? ''}'.isNotEmpty)
                 ListTile(
-                  leading: const Icon(
-                    Icons.play_circle,
-                    color: AppTokens.accent,
-                  ),
+                  leading: Icon(Icons.play_circle, color: AppTokens.accent),
                   title: Text(
                     DictionaryConfig.strings['playAudio']!,
-                    style: const TextStyle(color: AppTokens.primary),
+                    style: TextStyle(color: _textPrimary(context)),
                   ),
                   onTap: () => _playDetail(context, '${entry.raw['audio']}'),
                 ),
@@ -1546,7 +2128,7 @@ class _EntryDetailState extends State<EntryDetail> {
         margin: const EdgeInsets.only(bottom: 12),
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: AppTokens.card,
+          color: _surfaceColor(context),
           borderRadius: BorderRadius.circular(16),
         ),
         child: Column(
@@ -1555,18 +2137,17 @@ class _EntryDetailState extends State<EntryDetail> {
             if (showNumber)
               Text(
                 '${DictionaryConfig.strings['sense']} $i',
-                style: const TextStyle(
-                  color: AppTokens.accentSoft,
-                  fontSize: 12,
-                ),
+                style: TextStyle(color: _accentText(context), fontSize: 12),
               ),
             _meaningRow(
+              context: context,
               label: DictionaryConfig.strings['label_urdu_meaning']!,
               value: s['urdu'] ?? '',
               direction: TextDirection.rtl,
               card: false,
             ),
             _meaningRow(
+              context: context,
               label: DictionaryConfig.strings['label_english_meaning']!,
               value: s['english'] ?? '',
               direction: TextDirection.ltr,
@@ -1588,7 +2169,7 @@ class _EntryDetailState extends State<EntryDetail> {
               fontFamily: 'NotoNastaliqUrdu',
               height: 2.1,
               fontSize: 17,
-              color: AppTokens.primary,
+              color: _textPrimary(context),
             ),
           ),
         if ('${s['urdu'] ?? ''}'.isNotEmpty)
@@ -1598,14 +2179,14 @@ class _EntryDetailState extends State<EntryDetail> {
             style: TextStyle(
               fontFamily: 'NotoNastaliqUrdu',
               height: 2.1,
-              color: AppTokens.secondary,
+              color: _textSecondary(context),
               fontSize: 15,
             ),
           ),
         if ('${s['english'] ?? ''}'.isNotEmpty)
           Text(
             '${s['english']}',
-            style: const TextStyle(color: AppTokens.secondary, fontSize: 15),
+            style: TextStyle(color: _textSecondary(context), fontSize: 15),
           ),
       ],
     ),

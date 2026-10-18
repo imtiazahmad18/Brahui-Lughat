@@ -69,6 +69,16 @@ class DictionaryConfig {
     'searchBrahui': 'براہوی لفظ تلاش کریں…',
     'searchEnglish': 'Search an English word…',
     'searchUrdu': 'اردو لفظ تلاش کریں…',
+    'modeBrahuiTitle': 'براہوی → اردو / English',
+    'modeBrahuiHint': 'Type a Brahui word, see its Urdu and English meaning',
+    'modeEnglishTitle': 'English → براہوی',
+    'modeEnglishHint': 'Type an English word, find the Brahui word',
+    'modeUrduTitle': 'اردو → براہوی',
+    'modeUrduHint': 'Type an Urdu word, find the Brahui word',
+    'switchToUrdu': 'This looks like Urdu. Switch to Urdu → Brahui?',
+    'switchToEnglish': 'This looks like English. Switch to English → Brahui?',
+    'noResultsFor': 'No results for “{query}”',
+    'partialMatches': 'Partial matches',
     'wordOfDay': 'WORD OF THE DAY',
     'quickSearch': 'QUICK SEARCH',
     'statistics': 'DICTIONARY STATISTICS',
@@ -94,36 +104,144 @@ class AppTokens {
       card = Color(0xff12131f);
   static const accent = Color(0xff8b5cf6),
       accentSoft = Color(0xffa78bfa),
-      phonetic = Color(0xff22d3ee);
+      phonetic = accentSoft;
   static const primary = Colors.white,
       secondary = Color(0xffb9b6d0),
       muted = Color(0xff88859b);
-  static ThemeData dark() => ThemeData.dark().copyWith(
-    textTheme: ThemeData.dark().textTheme.apply(fontFamily: 'UbuntuSans'),
-    primaryTextTheme: ThemeData.dark().primaryTextTheme.apply(
-      fontFamily: 'UbuntuSans',
-    ),
-    scaffoldBackgroundColor: bgBottom,
-    colorScheme: const ColorScheme.dark(
+  static ThemeData dark() {
+    final base = ThemeData(brightness: Brightness.dark, useMaterial3: true);
+    const scheme = ColorScheme.dark(
       primary: accent,
-      secondary: phonetic,
+      onPrimary: Colors.white,
+      secondary: accentSoft,
+      onSecondary: Colors.white,
       surface: card,
-    ),
-    cardColor: card,
-    appBarTheme: const AppBarTheme(
-      backgroundColor: Colors.transparent,
-      elevation: 0,
-    ),
-  );
-  static ThemeData light() => ThemeData.light().copyWith(
-    textTheme: ThemeData.light().textTheme.apply(fontFamily: 'UbuntuSans'),
-    primaryTextTheme: ThemeData.light().primaryTextTheme.apply(
-      fontFamily: 'UbuntuSans',
-    ),
-    scaffoldBackgroundColor: const Color(0xfff6f3ff),
-    colorScheme: ColorScheme.fromSeed(
+      onSurface: primary,
+      surfaceTint: Colors.transparent,
+      error: Color(0xffff6b7a),
+      onError: Colors.white,
+    );
+    return base.copyWith(
+      brightness: Brightness.dark,
+      textTheme: base.textTheme.apply(fontFamily: 'UbuntuSans'),
+      primaryTextTheme: base.primaryTextTheme.apply(fontFamily: 'UbuntuSans'),
+      scaffoldBackgroundColor: bgBottom,
+      colorScheme: scheme,
+      cardColor: card,
+      canvasColor: card,
+      popupMenuTheme: const PopupMenuThemeData(
+        color: card,
+        surfaceTintColor: Colors.transparent,
+        textStyle: TextStyle(color: primary),
+      ),
+      dialogTheme: const DialogThemeData(
+        backgroundColor: card,
+        surfaceTintColor: Colors.transparent,
+        elevation: 12,
+      ),
+      bottomSheetTheme: const BottomSheetThemeData(
+        backgroundColor: card,
+        modalBackgroundColor: card,
+        surfaceTintColor: Colors.transparent,
+        showDragHandle: true,
+        dragHandleColor: muted,
+      ),
+      appBarTheme: const AppBarTheme(
+        backgroundColor: bgBottom,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        surfaceTintColor: Colors.transparent,
+        foregroundColor: primary,
+        iconTheme: IconThemeData(color: secondary),
+        titleTextStyle: TextStyle(
+          color: primary,
+          fontFamily: 'UbuntuSans',
+          fontSize: 20,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+      navigationBarTheme: NavigationBarThemeData(
+        backgroundColor: const Color(0xff0d0e1c),
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        indicatorColor: accent.withValues(alpha: .18),
+        height: 76,
+        labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+        iconTheme: WidgetStateProperty.resolveWith(
+          (states) => IconThemeData(
+            color: states.contains(WidgetState.selected)
+                ? accentSoft
+                : secondary,
+            size: 22,
+          ),
+        ),
+        labelTextStyle: WidgetStateProperty.resolveWith(
+          (states) => TextStyle(
+            color: states.contains(WidgetState.selected)
+                ? accentSoft
+                : secondary,
+            fontFamily: 'UbuntuSans',
+            fontSize: 12,
+            fontWeight: states.contains(WidgetState.selected)
+                ? FontWeight.w600
+                : FontWeight.w400,
+          ),
+        ),
+      ),
+      dividerColor: Colors.white.withValues(alpha: .08),
+      snackBarTheme: const SnackBarThemeData(
+        backgroundColor: card,
+        contentTextStyle: TextStyle(color: primary),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  static ThemeData light() {
+    const lightSurface = Color(0xfffaf8ff);
+    const lightText = Color(0xff211a35);
+    final base = ThemeData(brightness: Brightness.light, useMaterial3: true);
+    final scheme = ColorScheme.fromSeed(
       seedColor: accent,
       brightness: Brightness.light,
-    ),
-  );
+      surface: lightSurface,
+    ).copyWith(surfaceTint: Colors.transparent, onSurface: lightText);
+    return base.copyWith(
+      brightness: Brightness.light,
+      textTheme: base.textTheme.apply(
+        fontFamily: 'UbuntuSans',
+        bodyColor: lightText,
+        displayColor: lightText,
+      ),
+      primaryTextTheme: base.primaryTextTheme.apply(fontFamily: 'UbuntuSans'),
+      scaffoldBackgroundColor: const Color(0xfff6f3ff),
+      colorScheme: scheme,
+      canvasColor: lightSurface,
+      cardColor: lightSurface,
+      appBarTheme: const AppBarTheme(
+        backgroundColor: Color(0xfff6f3ff),
+        foregroundColor: lightText,
+        surfaceTintColor: Colors.transparent,
+        scrolledUnderElevation: 0,
+      ),
+      navigationBarTheme: const NavigationBarThemeData(
+        backgroundColor: Color(0xffeee9f8),
+        surfaceTintColor: Colors.transparent,
+        indicatorColor: Color(0x338b5cf6),
+      ),
+      bottomSheetTheme: const BottomSheetThemeData(
+        backgroundColor: lightSurface,
+        modalBackgroundColor: lightSurface,
+        surfaceTintColor: Colors.transparent,
+      ),
+      dialogTheme: const DialogThemeData(
+        backgroundColor: lightSurface,
+        surfaceTintColor: Colors.transparent,
+      ),
+      popupMenuTheme: const PopupMenuThemeData(
+        color: lightSurface,
+        surfaceTintColor: Colors.transparent,
+      ),
+    );
+  }
 }

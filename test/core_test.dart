@@ -268,4 +268,125 @@ void main() {
     expect(meaningSearch, isNotEmpty);
     expect(meaningSearch.first.tier, 6);
   });
+
+  test('English reverse search uses conservative stems and data results', () {
+    final rows =
+        (jsonDecode(
+                  File('assets/data/dictionary.built.json').readAsStringSync(),
+                )
+                as List)
+            .cast<Map<String, dynamic>>();
+    final search = DictionarySearch(rows.map(DictionaryEntry.new).toList());
+    bool finds(String q, String starts) => search
+        .search(q, SearchMode.english)
+        .any((hit) => hit.headword.word.startsWith(starts));
+    expect(finds('broom', 'جارُو/یارو/بیوہاری'), isTrue);
+    expect(search.search('broom', SearchMode.english).first.tier, 1);
+    for (final query in ['to sweep', 'sweeping', 'sweep']) {
+      expect(finds(query, 'رُوفہ گننگ / روفنگ'), isTrue, reason: query);
+    }
+    expect(finds('henna', 'حِنام'), isTrue);
+    expect(finds('grapes', 'اَنگور'), isTrue);
+    expect(finds('sunflower', 'روش گژدان / روز گژدان'), isTrue);
+  });
+
+  test('Urdu reverse search returns requested word entries', () {
+    final rows =
+        (jsonDecode(
+                  File('assets/data/dictionary.built.json').readAsStringSync(),
+                )
+                as List)
+            .cast<Map<String, dynamic>>();
+    final search = DictionarySearch(rows.map(DictionaryEntry.new).toList());
+    bool finds(String q, String starts) => search
+        .search(q, SearchMode.urdu)
+        .any((hit) => hit.headword.word.startsWith(starts));
+    expect(finds('مہندی', 'حِنام'), isTrue);
+    expect(finds('جھاڑو', 'جارُو/یارو/بیوہاری'), isTrue);
+    expect(finds('جھاڑو', 'رُوفہ گننگ / روفنگ'), isTrue);
+    expect(finds('انگور', 'اَنگور'), isTrue);
+    expect(finds('سورج مکھی', 'روش گژدان / روز گژدان'), isTrue);
+  });
+
+  test(
+    'reverse search ranks phrases above shuffled words and groups headwords',
+    () {
+      final search = DictionarySearch([
+        fixture(1, 'word one', english: 'bright red flower'),
+        fixture(2, 'word one', english: 'bright red flower'),
+        fixture(3, 'word two', english: 'bright flower red'),
+        fixture(4, 'word three', english: 'red object; green bud'),
+      ]);
+      final hits = search.search('red flower', SearchMode.english);
+      expect(
+        hits.where((hit) => hit.headword.word == 'word one'),
+        hasLength(1),
+      );
+      expect(hits[0].headword.word, 'word one');
+      expect(hits[0].tier, 3);
+      expect(hits[0].subrank, lessThan(hits[1].subrank));
+      expect(hits.last.tier, 7);
+    },
+  );
+
+  test('English stop words remain searchable in a one-word query', () {
+    final search = DictionarySearch([
+      fixture(1, 'word', english: 'the; a; the broom; tool for sweeping'),
+    ]);
+    expect(search.search('the', SearchMode.english).single.tier, 1);
+    expect(search.search('the broom', SearchMode.english), hasLength(1));
+  });
+
+  test('Urdu stop words are ignored only in multi-word queries', () {
+    final search = DictionarySearch([
+      fixture(1, 'word', urdu: 'جھاڑو'),
+      fixture(2, 'stopword', urdu: 'کی'),
+    ]);
+    expect(
+      search.search('جھاڑو کی', SearchMode.urdu).first.headword.word,
+      'word',
+    );
+    expect(
+      search.search('کی', SearchMode.urdu).single.headword.word,
+      'stopword',
+    );
+  });
+
+  test('English stemmer handles plurals, past tense and gerunds', () {
+    expect(DictionaryNormalization.englishStem('berries'), 'berry');
+    expect(DictionaryNormalization.englishStem('boxes'), 'box');
+    expect(DictionaryNormalization.englishStem('sweeping'), 'sweep');
+    expect(DictionaryNormalization.englishStem('walked'), 'walk');
+    expect(DictionaryNormalization.englishStem('glass'), 'glass');
+  });
+
+  test('an earlier gloss ranks ahead of a later gloss at the same tier', () {
+    final search = DictionarySearch([
+      fixture(1, 'first', english: 'broom; tool'),
+      fixture(2, 'second', english: 'tool; broom'),
+    ]);
+    expect(
+      search.search('broom', SearchMode.english).first.headword.word,
+      'first',
+    );
+  });
+
+  test('script mismatch helper suggests the matching reverse-search mode', () {
+    expect(
+      suggestedModeForScript('مہندی', SearchMode.english, hasResults: false),
+      SearchMode.urdu,
+    );
+    expect(
+      suggestedModeForScript('henna', SearchMode.urdu, hasResults: false),
+      SearchMode.english,
+    );
+    expect(
+      suggestedModeForScript('sunflower', SearchMode.brahui, hasResults: false),
+      SearchMode.english,
+    );
+    expect(
+      suggestedModeForScript('sunflower', SearchMode.brahui, hasResults: true),
+      isNull,
+    );
+  });
 }

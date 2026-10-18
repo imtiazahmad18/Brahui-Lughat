@@ -1,4 +1,4 @@
-const CACHE = 'brahui-dictionary-shell-4367-aa8d8fcf';
+const CACHE = 'brahui-dictionary-shell-4367-6ea12edf';
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(['./', './index.html', './manifest.json'])));
   self.skipWaiting();

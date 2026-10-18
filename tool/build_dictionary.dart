@@ -57,6 +57,15 @@ Future<void> main(List<String> args) async {
       en,
       english: true,
     );
+    e['english_gloss_stems'] = (e['english_glosses_norm'] as List)
+        .map((gloss) => DictionaryNormalization.englishStems('$gloss'))
+        .toList();
+    e['urdu_gloss_tokens'] = (e['urdu_glosses_norm'] as List)
+        .map(
+          (gloss) =>
+              '$gloss'.split(' ').where((token) => token.isNotEmpty).toList(),
+        )
+        .toList();
     if (word.trim().isEmpty) {
       emptyWords++;
       emptyWordIds.add(e['id']);

@@ -16,6 +16,14 @@ class DictionaryEntry {
       List<String>.from(raw['urdu_glosses_norm'] ?? const []);
   List<String> get englishGlosses =>
       List<String>.from(raw['english_glosses_norm'] ?? const []);
+  List<List<String>> get englishGlossStems =>
+      (raw['english_gloss_stems'] as List? ?? const [])
+          .map((gloss) => List<String>.from(gloss as List))
+          .toList();
+  List<List<String>> get urduGlossTokens =>
+      (raw['urdu_gloss_tokens'] as List? ?? const [])
+          .map((gloss) => List<String>.from(gloss as List))
+          .toList();
   String get wordLoose => raw['word_loose']?.toString() ?? '';
   List<String> get variantsLoose =>
       List<String>.from(raw['variants_loose'] ?? const []);
@@ -38,10 +46,4 @@ class Headword {
           {'urdu': e.urdu, 'english': e.english},
     ];
   }
-}
-
-class SearchHit {
-  const SearchHit(this.headword, this.tier);
-  final Headword headword;
-  final int tier;
 }

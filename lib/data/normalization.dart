@@ -76,4 +76,39 @@ class DictionaryNormalization {
       })
       .where((g) => g.isNotEmpty)
       .toList();
+
+  static String normalizeEnglishQuery(String input) => input
+      .toLowerCase()
+      .replaceAll(RegExp(r"[^a-z0-9\s]"), ' ')
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim()
+      .replaceFirst(RegExp(r'^(to|a|an|the)\s+'), '');
+
+  static String englishStem(String word) {
+    var value = word.toLowerCase();
+    if (value.length > 4 && value.endsWith('ies')) {
+      return '${value.substring(0, value.length - 3)}y';
+    }
+    if (value.length > 4 &&
+        (value.endsWith('ches') ||
+            value.endsWith('shes') ||
+            value.endsWith('sses') ||
+            value.endsWith('xes') ||
+            value.endsWith('zes'))) {
+      value = value.substring(0, value.length - 2);
+    } else if (value.length > 5 && value.endsWith('ing')) {
+      value = value.substring(0, value.length - 3);
+    } else if (value.length > 4 && value.endsWith('ed')) {
+      value = value.substring(0, value.length - 2);
+    } else if (value.length > 3 &&
+        value.endsWith('s') &&
+        !value.endsWith('ss')) {
+      value = value.substring(0, value.length - 1);
+    }
+    return value;
+  }
+
+  static List<String> englishStems(String gloss) => normalizeEnglishQuery(
+    gloss,
+  ).split(' ').where((w) => w.isNotEmpty).map(englishStem).toList();
 }
