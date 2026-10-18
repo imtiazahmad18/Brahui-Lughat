@@ -1,0 +1,36 @@
+name: brahui_dictionary
+description: Offline-first Brahui, Urdu and English dictionary.
+publish_to: none
+version: 1.0.0+1
+environment:
+  sdk: '>=3.10.0 <4.0.0'
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_riverpod: ^3.4.3
+  shared_preferences: ^2.5.5
+  share_plus: ^13.3.1
+  just_audio: ^0.10.6
+  unorm_dart: ^0.3.2
+  web: ^1.1.1
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  test: ^1.25.15
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/data/dictionary.built.json
+    - assets/fonts/
+    - assets/logo.jpeg
+  fonts:
+    - family: UbuntuSans
+      fonts:
+        - asset: assets/fonts/UbuntuSans.ttf
+        - asset: assets/fonts/UbuntuSans.ttf
+          weight: 700
+    - family: NotoNastaliqUrdu
+      fonts:
+        - asset: assets/fonts/NotoNastaliqUrdu-Regular.ttf
+        - asset: assets/fonts/NotoNastaliqUrdu-Bold.ttf
+          weight: 700

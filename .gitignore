@@ -1,0 +1,10 @@
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+build/*
+!build/data_report.txt
+android/.gradle/
+android/local.properties
+android/app/build/
+web/.last_build_id

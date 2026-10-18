@@ -1,0 +1,14 @@
+{
+  "name": "Brahui Dictionary",
+  "short_name": "Brahui Lughat",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#0a0b1a",
+  "theme_color": "#0a0b1a",
+  "description": "Offline Brahui, Urdu and English dictionary",
+  "orientation": "portrait-primary",
+  "icons": [
+    {"src":"icons/app-icon-192.png","sizes":"192x192","type":"image/png"},
+    {"src":"icons/app-icon-512.png","sizes":"512x512","type":"image/png","purpose":"any maskable"}
+  ]
+}
