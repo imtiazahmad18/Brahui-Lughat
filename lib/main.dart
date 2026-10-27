@@ -205,7 +205,37 @@ class _BrahuiAppState extends State<BrahuiApp> with WidgetsBindingObserver {
         child: child!,
       ),
       home: loading
-          ? const Scaffold(body: Center(child: CircularProgressIndicator()))
+          ? Scaffold(
+              body: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(28),
+                      child: Image.asset(
+                        'assets/logo_square.png',
+                        width: 144,
+                        height: 144,
+                        fit: BoxFit.cover,
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    Text(
+                      DictionaryConfig.strings['title']!,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 20,
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+                    const SizedBox(
+                      width: 120,
+                      child: LinearProgressIndicator(),
+                    ),
+                  ],
+                ),
+              ),
+            )
           : loadError != null
           ? Scaffold(
               body: Center(
@@ -300,6 +330,16 @@ class _BrahuiAppState extends State<BrahuiApp> with WidgetsBindingObserver {
       children: [
         Row(
           children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: Image.asset(
+                'assets/logo_square.png',
+                width: 42,
+                height: 42,
+                fit: BoxFit.cover,
+              ),
+            ),
+            const SizedBox(width: 10),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,

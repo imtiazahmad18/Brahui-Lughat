@@ -8,9 +8,25 @@
   <meta name="description" content="Offline Brahui, Urdu and English dictionary">
   <meta name="theme-color" content="#0a0b1a">
   <link rel="manifest" href="manifest.json">
+  <style>
+    html, body { background: #0a0b1a; margin: 0; min-height: 100%; }
+    #app-loading { position: fixed; inset: 0; z-index: 9999; display: grid; place-content: center; justify-items: center; gap: 18px; color: #f7f4ff; font: 600 18px system-ui, sans-serif; background: #0a0b1a; transition: opacity .2s ease; }
+    #app-loading img { width: min(42vw, 220px); height: min(42vw, 220px); object-fit: cover; border-radius: 28px; }
+    #app-loading[hidden] { display: none; }
+  </style>
   <title>Brahui Dictionary</title>
 </head>
 <body>
+  <div id="app-loading" role="status" aria-label="Loading Brahui Dictionary">
+    <img src="assets/assets/logo_square.png" alt="Brahui Lughat logo">
+    <span>Brahui Dictionary</span>
+  </div>
+  <script>
+    window.addEventListener('flutter-first-frame', () => {
+      const loading = document.getElementById('app-loading');
+      if (loading) loading.hidden = true;
+    });
+  </script>
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => navigator.serviceWorker.register('service-worker.js'));

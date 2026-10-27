@@ -23,6 +23,7 @@ flutter:
     - assets/data/dictionary.built.json
     - assets/fonts/
     - assets/logo.jpeg
+    - assets/logo_square.png
   fonts:
     - family: UbuntuSans
       fonts:
